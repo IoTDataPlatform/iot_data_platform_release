@@ -1,0 +1,31 @@
+{
+    "connector.class": "org.apache.iceberg.connect.IcebergSinkConnector",
+    "tasks.max": "1",
+
+    "topics": "earth-temp-enriched",
+
+    "iceberg.tables": "earth.temp_enriched",
+    "iceberg.tables.auto-create-enabled": "true",
+    "iceberg.tables.evolve-schema-enabled": "true",
+
+    "iceberg.table.earth.temp_enriched.partition-by": "day(timestamp)",
+
+    "iceberg.catalog.type": "rest",
+    "iceberg.catalog.uri": "http://iceberg-rest:8181",
+    "iceberg.catalog.warehouse": "${YC_S3_WAREHOUSE}",
+    "iceberg.catalog.io-impl": "org.apache.iceberg.aws.s3.S3FileIO",
+
+    "iceberg.catalog.client.region": "${YC_AWS_REGION}",
+    "iceberg.catalog.s3.endpoint": "${YC_S3_ENDPOINT}",
+    "iceberg.catalog.s3.path-style-access": "true",
+    "iceberg.catalog.s3.access-key-id": "${YC_AWS_ACCESS_KEY_ID}",
+    "iceberg.catalog.s3.secret-access-key": "${YC_AWS_SECRET_ACCESS_KEY}",
+
+    "key.converter": "org.apache.kafka.connect.storage.StringConverter",
+    "value.converter": "io.confluent.connect.avro.AvroConverter",
+    "value.converter.schema.registry.url": "http://kafka-schema-registry:8081",
+    "value.converter.schemas.enable": "true",
+
+    "consumer.override.auto.offset.reset": "earliest",
+    "iceberg.control.commit.interval-ms": "10000"
+}

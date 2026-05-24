@@ -1,0 +1,206 @@
+services:
+  kafka:
+    user: "0:0"
+    image: confluentinc/cp-kafka:8.1.0
+    container_name: kafka
+    hostname: kafka
+    ports:
+      - "127.0.0.1:9092:9092"
+      - "127.0.0.1:9094:9094"
+    environment:
+      KAFKA_PROCESS_ROLES: "broker,controller"
+      KAFKA_NODE_ID: "1"
+      KAFKA_CONTROLLER_QUORUM_VOTERS: "1@kafka:9093"
+      KAFKA_CONTROLLER_LISTENER_NAMES: "CONTROLLER"
+
+      KAFKA_LISTENERS: "PLAINTEXT://0.0.0.0:9092,EXTERNAL://0.0.0.0:9094,CONTROLLER://0.0.0.0:9093"
+      KAFKA_ADVERTISED_LISTENERS: "PLAINTEXT://kafka:9092,EXTERNAL://127.0.0.1:9094"
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: "PLAINTEXT:PLAINTEXT,EXTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT"
+      KAFKA_INTER_BROKER_LISTENER_NAME: "PLAINTEXT"
+
+      KAFKA_NUM_PARTITIONS: "1"
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_DELETE_TOPIC_ENABLE: "true"
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "1"
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: "1"
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: "1"
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: "0"
+
+      KAFKA_MESSAGE_MAX_BYTES: "10485760"
+      KAFKA_REPLICA_FETCH_MAX_BYTES: "10485760"
+
+      KAFKA_LOG_DIRS: "/var/lib/kafka/data"
+      CLUSTER_ID: "MkU3OEVBNTcwNTJENDM2Qk"
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    restart: unless-stopped
+    healthcheck:
+      test: [ "CMD-SHELL", "bash -c '</dev/tcp/127.0.0.1/9094'" ]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  kafka-schema-registry:
+    image: confluentinc/cp-schema-registry:8.1.0
+    container_name: kafka-schema-registry
+    depends_on:
+      kafka:
+        condition: service_healthy
+    environment:
+      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: "PLAINTEXT://kafka:9092"
+      SCHEMA_REGISTRY_LISTENERS: "http://0.0.0.0:8081"
+      SCHEMA_REGISTRY_HOST_NAME: "kafka-schema-registry"
+    ports:
+      - "127.0.0.1:8081:8081"
+    healthcheck:
+      test: [ "CMD-SHELL", "curl -fsS http://localhost:8081/subjects >/dev/null" ]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 15s
+
+  kafka-connect:
+    build:
+      context: kafka-connect
+    image: my-cp-kafka-connect:8.1.0
+    container_name: kafka-connect
+    hostname: kafka-connect
+    depends_on:
+      kafka:
+        condition: service_healthy
+      kafka-schema-registry:
+        condition: service_healthy
+    environment:
+      CONNECT_BOOTSTRAP_SERVERS: "kafka:9092"
+      CONNECT_REST_PORT: 8083
+      CONNECT_REST_ADVERTISED_HOST_NAME: "kafka-connect"
+      CONNECT_GROUP_ID: "connect-cluster"
+
+      CONNECT_CONFIG_STORAGE_TOPIC: "__connect-configs"
+      CONNECT_OFFSET_STORAGE_TOPIC: "__connect-offsets"
+      CONNECT_STATUS_STORAGE_TOPIC: "__connect-status"
+
+      CONNECT_CONFIG_STORAGE_REPLICATION_FACTOR: 1
+      CONNECT_OFFSET_STORAGE_REPLICATION_FACTOR: 1
+      CONNECT_STATUS_STORAGE_REPLICATION_FACTOR: 1
+
+      CONNECT_KEY_CONVERTER: "org.apache.kafka.connect.storage.StringConverter"
+      CONNECT_VALUE_CONVERTER: "io.confluent.connect.avro.AvroConverter"
+      CONNECT_VALUE_CONVERTER_SCHEMA_REGISTRY_URL: "http://kafka-schema-registry:8081"
+      CONNECT_VALUE_CONVERTER_SCHEMAS_ENABLE: "true"
+      CONNECT_KEY_CONVERTER_SCHEMAS_ENABLE: "false"
+
+      CONNECT_INTERNAL_KEY_CONVERTER: "org.apache.kafka.connect.json.JsonConverter"
+      CONNECT_INTERNAL_VALUE_CONVERTER: "org.apache.kafka.connect.json.JsonConverter"
+      CONNECT_INTERNAL_KEY_CONVERTER_SCHEMAS_ENABLE: "false"
+      CONNECT_INTERNAL_VALUE_CONVERTER_SCHEMAS_ENABLE: "false"
+
+      CONNECT_PLUGIN_PATH: "/usr/share/confluent-hub-components"
+      CONNECT_LOG4J_ROOT_LOGLEVEL: "INFO"
+    ports:
+      - "127.0.0.1:8083:8083"
+    restart: unless-stopped
+    healthcheck:
+      test: [ "CMD-SHELL", "curl -fsS http://localhost:8083/connector-plugins >/dev/null" ]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 15s
+
+  kafka-ui:
+    image: kafbat/kafka-ui:main
+    depends_on:
+      kafka:
+        condition: service_healthy
+      kafka-schema-registry:
+        condition: service_healthy
+      kafka-connect:
+        condition: service_healthy
+    environment:
+      KAFKA_CLUSTERS_0_NAME: "local"
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: "kafka:9092"
+      KAFKA_CLUSTERS_0_SCHEMAREGISTRY: "http://kafka-schema-registry:8081"
+      KAFKA_CLUSTERS_0_KAFKACONNECT_0_NAME: "connect-local"
+      KAFKA_CLUSTERS_0_KAFKACONNECT_0_ADDRESS: "http://kafka-connect:8083"
+    ports:
+      - "127.0.0.1:8080:8080"
+
+  postgres-rest:
+    image: postgres:16-alpine
+    container_name: postgres-rest
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    ports:
+      - "127.0.0.1:5433:5432"
+    volumes:
+      - postgres-rest-data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}" ]
+      interval: 3s
+      timeout: 2s
+      retries: 50
+
+  iceberg-rest:
+    image: tabulario/iceberg-rest:latest
+    container_name: iceberg-rest
+    depends_on:
+      postgres-rest:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8181:8181"
+    environment:
+      CATALOG_CATALOG__IMPL: org.apache.iceberg.jdbc.JdbcCatalog
+      CATALOG_URI: jdbc:postgresql://postgres-rest:5432/${POSTGRES_DB}
+      CATALOG_JDBC_USER: ${POSTGRES_USER}
+      CATALOG_JDBC_PASSWORD: ${POSTGRES_PASSWORD}
+      CATALOG_JDBC_DRIVER: org.postgresql.Driver
+      CATALOG_WAREHOUSE: ${YC_S3_WAREHOUSE}
+
+      CATALOG_IO__IMPL: org.apache.iceberg.aws.s3.S3FileIO
+
+      CATALOG_S3_ENDPOINT: ${YC_S3_ENDPOINT}
+      CATALOG_S3_REGION: ${YC_AWS_REGION}
+      CATALOG_S3_PATH_STYLE_ACCESS: "true"
+
+      AWS_ACCESS_KEY_ID: ${YC_AWS_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${YC_AWS_SECRET_ACCESS_KEY}
+      AWS_REGION: ${YC_AWS_REGION}
+
+  connect-init:
+    image: alpine:3.20
+    depends_on:
+      kafka-connect:
+        condition: service_healthy
+      iceberg-rest:
+        condition: service_started
+    volumes:
+      - ./kafka-connect/init:/init:ro
+    env_file:
+      - .env
+    environment:
+      CONNECT_URL: http://kafka-connect:8083
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        apk add --no-cache curl gettext
+        /bin/sh /init/init.sh
+    restart: "no"
+
+  temp-enricher:
+    build:
+      context: ./streams
+      dockerfile: Dockerfile
+    container_name: temp-enricher
+    depends_on:
+      connect-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+volumes:
+  kafka-data:
+  postgres-rest-data:
+
